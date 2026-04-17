@@ -1,57 +1,86 @@
-# -*- coding: utf-8 -*-
+import streamlit as st
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
+import plotly.graph_objects as go
 import matplotlib.patches as mpatches
+import io
 
-CSV_PATH = "/Users/luisalbertoalvarezalvarado/BALANCE_HIDRICO/Cordoba.csv"
+st.set_page_config(page_title="Balance de Riego", page_icon="💧", layout="wide")
+st.title("💧 Balance de Volumen en Riego - Cordoba")
+st.markdown("**Cultivo: Naranjos | Suelo: Arcilloso 1m**")
+st.markdown("---")
 
-# PARAMETROS DEL SUELO (arcilloso, profundidad 1 m)
-CC_vol  = 0.396
-PMP_vol = 0.272
-Prof    = 1000
+# SIDEBAR
+st.sidebar.header("Parametros del Suelo")
+CC_vol       = st.sidebar.number_input("CC (cm3/cm3)",   value=0.396, step=0.001, format="%.3f")
+PMP_vol      = st.sidebar.number_input("PMP (cm3/cm3)",  value=0.272, step=0.001, format="%.3f")
+Prof         = st.sidebar.number_input("Profundidad (mm)", value=1000, step=50)
+frac_nap     = st.sidebar.slider("Fraccion NAP",      0.1, 1.0, 0.5,  0.05)
+frac_consig  = st.sidebar.slider("Fraccion consigna", 0.1, 1.0, 0.25, 0.05)
 
 CC       = CC_vol  * Prof
 PMP      = PMP_vol * Prof
 IHD      = CC - PMP
-NAP      = 0.5 * IHD
-CONSIGNA = 0.25 * NAP
+NAP      = frac_nap * IHD
+CONSIGNA = frac_consig * NAP
 
-# COEFICIENTES Kc NARANJOS (citricos)
-KC_PUNTOS = [
-    (1,   0.65), (60,  0.65), (90,  0.70),
-    (120, 0.75), (180, 0.75), (240, 0.70),
-    (300, 0.65), (365, 0.65)
-]
-dias_kc   = np.array([p[0] for p in KC_PUNTOS])
-vals_kc   = np.array([p[1] for p in KC_PUNTOS])
-KC_DIARIO = np.interp(np.arange(1, 366), dias_kc, vals_kc)
+st.sidebar.markdown("---")
+st.sidebar.write("CC =", round(CC,1), "mm")
+st.sidebar.write("PMP =", round(PMP,1), "mm")
+st.sidebar.write("IHD =", round(IHD,1), "mm")
+st.sidebar.write("NAP =", round(NAP,1), "mm")
+st.sidebar.write("Consigna =", round(CONSIGNA,1), "mm")
 
-# CARGA Y LIMPIEZA DE DATOS
-df = pd.read_csv(CSV_PATH, sep=';', decimal='.', na_values=['n/d', '', ' '])
+# CARGA ARCHIVO
+st.header("1. Carga de datos")
+archivo = st.file_uploader("Sube el archivo Cordoba.csv", type=["csv"])
+
+if archivo is None:
+    st.warning("Sube el archivo Cordoba.csv para comenzar.")
+    st.stop()
+
+df = pd.read_csv(archivo, sep=';', decimal='.', na_values=['n/d','',' '])
 df.columns = df.columns.str.strip()
 df['FECHA'] = pd.to_datetime(df['FECHA'], format='%d/%m/%y', errors='coerce')
-df = df.dropna(subset=['FECHA'])
-df = df.sort_values('FECHA').reset_index(drop=True)
-df = df.rename(columns={'Co06Precip': 'P', 'Co06ETo': 'ETo'})
+df = df.dropna(subset=['FECHA']).sort_values('FECHA').reset_index(drop=True)
+df = df.rename(columns={'Co06Precip':'P','Co06ETo':'ETo'})
 df['P']   = pd.to_numeric(df['P'],   errors='coerce').fillna(0)
 df['ETo'] = pd.to_numeric(df['ETo'], errors='coerce').fillna(0)
 df['Anio'] = df['FECHA'].dt.year
 df['DOY']  = df['FECHA'].dt.dayofyear
-df['Kc']   = df['DOY'].apply(lambda d: KC_DIARIO[min(d, 365) - 1])
-df['ETc']  = df['ETo'] * df['Kc']
 anos = sorted(df['Anio'].unique())
+st.success("Datos cargados: " + str(len(df)) + " registros | " + str(anos[0]) + " - " + str(anos[-1]))
 
-# BALANCE HIDRICO ANUAL - NECESIDADES NETAS DE RIEGO
+# Kc
+KC_PUNTOS = [(1,0.65),(60,0.65),(90,0.70),(120,0.75),(180,0.75),(240,0.70),(300,0.65),(365,0.65)]
+dias_kc   = np.array([p[0] for p in KC_PUNTOS])
+vals_kc   = np.array([p[1] for p in KC_PUNTOS])
+KC_DIARIO = np.interp(np.arange(1,366), dias_kc, vals_kc)
+df['Kc']  = df['DOY'].apply(lambda d: KC_DIARIO[min(d,365)-1])
+df['ETc'] = df['ETo'] * df['Kc']
+
+# FIGURA 1
+st.markdown("---")
+st.header("2. Figura 1 - Coeficiente Kc Naranjos")
+fig1 = go.Figure()
+fig1.add_trace(go.Scatter(x=list(range(1,366)), y=list(KC_DIARIO),
+    mode='lines', line=dict(color='#2ecc71', width=3)))
+fig1.update_layout(title='Figura 1. Kc - Naranjos', xaxis_title='Dia del ano',
+    yaxis_title='Kc', yaxis=dict(range=[0,1]), height=380, template='plotly_white')
+st.plotly_chart(fig1, use_container_width=True)
+
+# BALANCE
+st.markdown("---")
+st.header("3. Figura 2 - Necesidades netas de riego por ano")
+
 resultados = {}
-
 for ano in anos:
-    datos = df[df['Anio'] == ano].copy().reset_index(drop=True)
+    datos = df[df['Anio']==ano].copy().reset_index(drop=True)
     if len(datos) < 300:
         continue
-    AC       = 0.0
+    AC = 0.0
     NR_anual = 0.0
-    ac_serie   = []
+    ac_serie = []
     riego_dias = []
     for idx, row in datos.iterrows():
         AC += row['ETc'] - row['P']
@@ -62,126 +91,135 @@ for ano in anos:
             riego_dias.append((idx, AC))
             AC = 0.0
         ac_serie.append(AC)
-    resultados[ano] = {
-        'NR':         NR_anual,
-        'n_riegos':   len(riego_dias),
-        'ac_serie':   ac_serie,
-        'riego_dias': riego_dias,
-        'datos':      datos
-    }
+    resultados[ano] = {'NR':NR_anual,'n_riegos':len(riego_dias),
+                       'ac_serie':ac_serie,'riego_dias':riego_dias,'datos':datos}
 
-# PROBABILIDADES DE EXCEDENCIA
 anos_val = sorted(resultados.keys())
 NR_vals  = np.array([resultados[a]['NR'] for a in anos_val])
-n_total  = len(NR_vals)
 NR_ord   = np.sort(NR_vals)[::-1]
-prob_exc = np.arange(1, n_total + 1) / (n_total + 1) * 100
-NR_50    = np.interp(50, prob_exc, NR_ord)
+n_total  = len(NR_vals)
+prob_exc = np.arange(1, n_total+1) / (n_total+1) * 100
+NR_50    = float(np.interp(50, prob_exc, NR_ord))
+difs     = {a: abs(resultados[a]['NR']-NR_50) for a in anos_val}
+ano_med  = min(difs, key=difs.get)
+
+colores = ['#e74c3c' if a==ano_med else '#3498db' for a in anos_val]
+fig2 = go.Figure()
+fig2.add_trace(go.Bar(x=list(anos_val), y=list(NR_vals), marker_color=colores))
+fig2.add_hline(y=NR_50, line_dash='dash', line_color='orange',
+               annotation_text='P50=' + str(round(NR_50)) + 'mm')
+fig2.update_layout(title='Figura 2. Necesidades netas de riego por ano',
+    xaxis_title='Ano', yaxis_title='NR (mm)', height=400, template='plotly_white')
+st.plotly_chart(fig2, use_container_width=True)
+
+# TABLA NR
+tabla_nr = pd.DataFrame({
+    'Ano': anos_val,
+    'NR (mm)': [round(resultados[a]['NR'],1) for a in anos_val],
+    'N riegos': [resultados[a]['n_riegos'] for a in anos_val],
+    'Ano medio': ['SI' if a==ano_med else '' for a in anos_val]
+})
+with st.expander("Ver tabla NR por ano"):
+    st.dataframe(tabla_nr, use_container_width=True)
+
+# FIGURA 3
+st.markdown("---")
+st.header("4. Figura 3 - Probabilidad de excedencia")
+fig3 = go.Figure()
+fig3.add_trace(go.Scatter(x=list(NR_ord), y=list(prob_exc), mode='lines+markers',
+    line=dict(color='#9b59b6', width=2.5),
+    marker=dict(size=8, color='white', line=dict(color='#9b59b6', width=2))))
+fig3.add_hline(y=50,    line_dash='dash', line_color='red', opacity=0.6)
+fig3.add_vline(x=NR_50, line_dash='dash', line_color='red', opacity=0.6)
+fig3.add_trace(go.Scatter(x=[NR_50], y=[50], mode='markers',
+    marker=dict(size=14, color='red'), name='P50=' + str(round(NR_50)) + ' mm'))
+fig3.update_layout(title='Figura 3. Probabilidad de excedencia',
+    xaxis_title='Necesidades netas (mm)', yaxis_title='Probabilidad (%)',
+    yaxis=dict(range=[0,105]), height=400, template='plotly_white')
+st.plotly_chart(fig3, use_container_width=True)
+
+tabla_exc = pd.DataFrame({
+    'Ano': anos_val,
+    'NR (mm)': [round(v,1) for v in NR_vals],
+    'NR ordenada': [round(v,1) for v in NR_ord],
+    'N orden': list(range(1, n_total+1)),
+    'Prob exc (%)': [round(p,1) for p in prob_exc]
+})
+with st.expander("Ver tabla probabilidades"):
+    st.dataframe(tabla_exc, use_container_width=True)
 
 # ANO MEDIO
-difs    = {a: abs(resultados[a]['NR'] - NR_50) for a in anos_val}
-ano_med = min(difs, key=difs.get)
-res_med = resultados[ano_med]
+st.markdown("---")
+st.header("5. Ano medio: " + str(ano_med))
+c1, c2, c3 = st.columns(3)
+c1.metric("Ano medio", ano_med)
+c2.metric("NR", str(round(resultados[ano_med]['NR'],1)) + " mm")
+c3.metric("N riegos", resultados[ano_med]['n_riegos'])
+
+res_med  = resultados[ano_med]
 ac_serie = res_med['ac_serie']
-dias_p   = np.arange(1, len(ac_serie) + 1)
+dias_p   = list(range(1, len(ac_serie)+1))
+datos_m  = res_med['datos']
 
-# FIGURA 1 - Coeficiente de cultivo Kc de los naranjos
-plt.style.use('seaborn-v0_8-whitegrid')
-
-fig1, ax1 = plt.subplots(figsize=(12, 5))
-ax1.plot(range(1, 366), KC_DIARIO, color='#2ecc71', linewidth=2.5)
-ax1.set_title('Figura 1. Coeficiente de cultivo Kc - Naranjos (Citricos)',
-              fontsize=13, fontweight='bold')
-ax1.set_xlabel('Dia del ano')
-ax1.set_ylabel('Kc')
-ax1.set_xlim(0, 365)
-ax1.set_ylim(0, 1.0)
-plt.tight_layout()
-plt.savefig('figura1_kc.png', dpi=150, bbox_inches='tight')
-plt.show()
-
-# FIGURA 2 - Necesidades netas de riego por ano
-fig2, ax2 = plt.subplots(figsize=(12, 5))
-colores = ['#e74c3c' if a == ano_med else '#3498db' for a in anos_val]
-ax2.bar(anos_val, NR_vals, color=colores, edgecolor='white', linewidth=0.5)
-ax2.axhline(NR_50, color='orange', linestyle='--', linewidth=2)
-ax2.set_title('Figura 2. Necesidades netas de riego por ano',
-              fontsize=13, fontweight='bold')
-ax2.set_xlabel('Ano')
-ax2.set_ylabel('NR (mm)')
-ax2.legend(handles=[
-    mpatches.Patch(color='#3498db', label='NR anual'),
-    mpatches.Patch(color='#e74c3c', label='Ano medio (' + str(ano_med) + ')'),
-    mpatches.Patch(color='orange',  label='NR media P50 = ' + str(round(NR_50)) + ' mm')
-], fontsize=10)
-plt.tight_layout()
-plt.savefig('figura2_NR_anual.png', dpi=150, bbox_inches='tight')
-plt.show()
-
-# FIGURA 3 - Probabilidad de excedencia de las necesidades netas
-fig3, ax3 = plt.subplots(figsize=(12, 5))
-ax3.plot(NR_ord, prob_exc, 'o-', color='#9b59b6', linewidth=2.5,
-         markersize=7, markerfacecolor='white', markeredgewidth=2)
-ax3.axhline(50,    color='red', linestyle='--', linewidth=1.5, alpha=0.7)
-ax3.axvline(NR_50, color='red', linestyle='--', linewidth=1.5, alpha=0.7)
-ax3.scatter([NR_50], [50], color='red', s=120, zorder=5,
-            label='P50 = ' + str(round(NR_50)) + ' mm')
-ax3.set_title('Figura 3. Probabilidad de excedencia de las necesidades netas',
-              fontsize=13, fontweight='bold')
-ax3.set_xlabel('Necesidades netas (mm)')
-ax3.set_ylabel('Probabilidad de excedencia (%)')
-ax3.set_xlim(min(NR_ord) * 0.95, max(NR_ord) * 1.05)
-ax3.set_ylim(0, 105)
-ax3.legend(fontsize=11)
-plt.tight_layout()
-plt.savefig('figura3_prob_excedencia.png', dpi=150, bbox_inches='tight')
-plt.show()
-
-# FIGURA 4 - Evolucion anual del agua consumida (ano medio)
-fig4, ax4 = plt.subplots(figsize=(12, 5))
-ax4.plot(dias_p, ac_serie, color='#2c3e50', linewidth=1.5)
-ax4.axhline(CONSIGNA, color='red', linestyle='--', linewidth=1.5)
+# FIGURA 4
+fig4 = go.Figure()
+fig4.add_trace(go.Scatter(x=dias_p, y=ac_serie, mode='lines',
+    line=dict(color='#2c3e50', width=1.5), name='AC'))
+fig4.add_hline(y=CONSIGNA, line_dash='dash', line_color='red',
+               annotation_text='Consigna=' + str(round(CONSIGNA,1)) + 'mm')
 for (di, lam) in res_med['riego_dias']:
-    ax4.axvline(di + 1, color='#3498db', linewidth=0.8, alpha=0.6)
-ax4.set_title('Figura 4. Evolucion anual del agua consumida - Ano ' + str(ano_med),
-              fontsize=13, fontweight='bold')
-ax4.set_xlabel('Dia del ano')
-ax4.set_ylabel('Lamina agotada (mm)')
-ax4.set_xlim(0, len(ac_serie))
-ax4.legend(handles=[
-    mpatches.Patch(color='#2c3e50', label='Agua consumida (AC)'),
-    mpatches.Patch(color='red',     label='Consigna = ' + str(round(CONSIGNA, 1)) + ' mm'),
-    mpatches.Patch(color='#3498db', alpha=0.6, label='Riego aplicado')
-], fontsize=10)
-plt.tight_layout()
-plt.savefig('figura4_agua_consumida.png', dpi=150, bbox_inches='tight')
-plt.show()
+    fig4.add_vline(x=di+1, line_color='#3498db', opacity=0.3, line_width=1)
+fig4.update_layout(title='Figura 4. Agua consumida - Ano ' + str(ano_med),
+    xaxis_title='Dia del ano', yaxis_title='Lamina agotada (mm)',
+    height=400, template='plotly_white')
+st.plotly_chart(fig4, use_container_width=True)
 
-# FIGURA 5 - Lamina disponible en el suelo (ano medio)
-agua_disp = np.array([IHD - ac for ac in ac_serie])
+# FIGURA 5
+agua_disp = [IHD - ac for ac in ac_serie]
+lam_disp  = [PMP + ad for ad in agua_disp]
 
-fig5, ax5 = plt.subplots(figsize=(12, 5))
-ax5.fill_between(dias_p, PMP, PMP + agua_disp, alpha=0.3, color='#3498db')
-ax5.plot(dias_p, PMP + agua_disp, color='#3498db', linewidth=1.5, label='Lamina disponible')
-ax5.axhline(CC,  color='blue',  linestyle='-',  linewidth=2,
-            label='CC = ' + str(round(CC)) + ' mm')
-ax5.axhline(PMP + (IHD - CONSIGNA), color='red', linestyle='--', linewidth=2,
-            label='Consigna = ' + str(round(CONSIGNA, 1)) + ' mm')
-ax5.axhline(PMP, color='brown', linestyle=':', linewidth=1.5,
-            label='PMP = ' + str(round(PMP)) + ' mm')
-ax5.set_title('Figura 5. Lamina disponible en el suelo - Ano ' + str(ano_med),
-              fontsize=13, fontweight='bold')
-ax5.set_xlabel('Dia del ano')
-ax5.set_ylabel('Lamina (mm)')
-ax5.set_xlim(0, len(ac_serie))
-ax5.set_ylim(PMP * 0.9, CC * 1.05)
-ax5.legend(fontsize=10)
-plt.tight_layout()
-plt.savefig('figura5_lamina_disponible.png', dpi=150, bbox_inches='tight')
-plt.show()
+fig5 = go.Figure()
+fig5.add_trace(go.Scatter(
+    x=dias_p + dias_p[::-1],
+    y=lam_disp + [PMP]*len(dias_p),
+    fill='toself', fillcolor='rgba(52,152,219,0.2)',
+    line=dict(color='rgba(0,0,0,0)'), showlegend=False))
+fig5.add_trace(go.Scatter(x=dias_p, y=lam_disp, mode='lines',
+    line=dict(color='#3498db', width=2), name='Lamina disponible'))
+fig5.add_hline(y=CC,  line_color='blue',  line_width=2,
+               annotation_text='CC=' + str(round(CC)) + 'mm')
+fig5.add_hline(y=PMP+(IHD-CONSIGNA), line_dash='dash', line_color='red', line_width=2,
+               annotation_text='Consigna=' + str(round(CONSIGNA,1)) + 'mm')
+fig5.add_hline(y=PMP, line_dash='dot', line_color='brown', line_width=1.5,
+               annotation_text='PMP=' + str(round(PMP)) + 'mm')
+fig5.update_layout(title='Figura 5. Lamina disponible - Ano ' + str(ano_med),
+    xaxis_title='Dia del ano', yaxis_title='Lamina (mm)',
+    yaxis=dict(range=[PMP*0.9, CC*1.05]),
+    height=400, template='plotly_white')
+st.plotly_chart(fig5, use_container_width=True)
 
-# RESUMEN EN CONSOLA
-print("NR media P50 =", round(NR_50, 1), "mm")
-print("Ano medio =", ano_med)
-print("NR ano medio =", round(resultados[ano_med]['NR'], 1), "mm")
-print("Numero de riegos =", resultados[ano_med]['n_riegos'])
+# TABLA RIEGOS
+filas = []
+for i, (di, lam) in enumerate(res_med['riego_dias'], 1):
+    if di < len(datos_m):
+        fecha = datos_m.loc[di,'FECHA'].strftime('%d/%m/%Y')
+        doy   = int(datos_m.loc[di,'DOY'])
+    else:
+        fecha = '---'
+        doy   = di
+    filas.append({'N': i, 'Fecha': fecha, 'Dia': doy, 'Lamina (mm)': round(lam,1)})
+
+st.markdown("**Tabla de riegos - Ano " + str(ano_med) + "**")
+st.dataframe(pd.DataFrame(filas), use_container_width=True)
+
+# DESCARGA EXCEL
+st.markdown("---")
+buf = io.BytesIO()
+with pd.ExcelWriter(buf, engine='openpyxl') as writer:
+    tabla_nr.to_excel(writer,  sheet_name='NR anual',       index=False)
+    tabla_exc.to_excel(writer, sheet_name='Prob excedencia', index=False)
+    pd.DataFrame(filas).to_excel(writer, sheet_name='Riegos ano medio', index=False)
+buf.seek(0)
+st.download_button("Descargar resultados en Excel", data=buf,
+    file_name="balance_riego.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")

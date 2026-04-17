@@ -30,13 +30,8 @@ st.sidebar.write("NAP =",      round(NAP,1),      "mm")
 st.sidebar.write("Consigna =", round(CONSIGNA,1), "mm")
 
 st.header("1. Carga de datos")
-archivo = st.file_uploader("Sube el archivo Cordoba.csv", type=["csv"])
-
-if archivo is None:
-    st.warning("Sube el archivo Cordoba.csv para comenzar.")
-    st.stop()
-
-df = pd.read_csv(archivo, sep=';', decimal='.', na_values=['n/d', '', ' '])
+CSV_URL = "https://raw.githubusercontent.com/mamutla3-1982/BALANCE-HIDRICO/main/Cordoba.csv"
+df = pd.read_csv(CSV_URL, sep=';', decimal='.', na_values=['n/d', '', ' '])
 df.columns = df.columns.str.strip()
 df['FECHA'] = pd.to_datetime(df['FECHA'], format='%d/%m/%y', errors='coerce')
 df = df.dropna(subset=['FECHA']).sort_values('FECHA').reset_index(drop=True)

@@ -40,8 +40,8 @@ df['P']    = pd.to_numeric(df['P'],   errors='coerce').fillna(0)
 df['ETo']  = pd.to_numeric(df['ETo'], errors='coerce').fillna(0)
 df['Anio'] = df['FECHA'].dt.year
 df['DOY']  = df['FECHA'].dt.dayofyear
-anos = sorted(df['Anio'].unique())
-st.success("Datos cargados: " + str(len(df)) + " registros | " + str(anos[0]) + " - " + str(anos[-1]))
+años = sorted(df['Anio'].unique())
+st.success("Datos cargados: " + str(len(df)) + " registros | " + str(años[0]) + " - " + str(años[-1]))
 
 KC_PUNTOS = [(1,0.65),(60,0.65),(90,0.70),(120,0.75),(180,0.75),(240,0.70),(300,0.65),(365,0.65)]
 dias_kc   = np.array([p[0] for p in KC_PUNTOS])
@@ -55,16 +55,16 @@ st.header("2. Figura 1 - Coeficiente Kc Naranjos")
 fig1 = go.Figure()
 fig1.add_trace(go.Scatter(x=list(range(1, 366)), y=list(KC_DIARIO),
     mode='lines', line=dict(color='#2ecc71', width=3)))
-fig1.update_layout(title='Figura 1. Kc - Naranjos', xaxis_title='Dia del ano',
+fig1.update_layout(title='Figura 1. Kc - Naranjos', xaxis_title='Dia del año',
     yaxis_title='Kc', yaxis=dict(range=[0, 1]), height=380, template='plotly_white')
 st.plotly_chart(fig1, use_container_width=True)
 
 st.markdown("---")
-st.header("3. Figura 2 - Necesidades netas de riego por ano")
+st.header("3. Figura 2 - Necesidades netas de riego por año")
 
 resultados = {}
-for ano in anos:
-    datos = df[df['Anio'] == ano].copy().reset_index(drop=True)
+for año in años:
+    datos = df[df['Anio'] == año].copy().reset_index(drop=True)
     if len(datos) < 300:
         continue
     AC = 0.0
@@ -80,34 +80,34 @@ for ano in anos:
             riego_dias.append((idx, AC))
             AC = 0.0
         ac_serie.append(AC)
-    resultados[ano] = {'NR': NR_anual, 'n_riegos': len(riego_dias),
+    resultados[año] = {'NR': NR_anual, 'n_riegos': len(riego_dias),
                        'ac_serie': ac_serie, 'riego_dias': riego_dias, 'datos': datos}
 
-anos_val = sorted(resultados.keys())
-NR_vals  = np.array([resultados[a]['NR'] for a in anos_val])
+años_val = sorted(resultados.keys())
+NR_vals  = np.array([resultados[a]['NR'] for a in años_val])
 NR_ord   = np.sort(NR_vals)[::-1]
 n_total  = len(NR_vals)
 prob_exc = np.arange(1, n_total + 1) / (n_total + 1) * 100
 NR_50    = float(np.interp(50, prob_exc, NR_ord))
-difs     = {a: abs(resultados[a]['NR'] - NR_50) for a in anos_val}
-ano_med  = min(difs, key=difs.get)
+difs     = {a: abs(resultados[a]['NR'] - NR_50) for a in años_val}
+año_med  = min(difs, key=difs.get)
 
-colores = ['#e74c3c' if a == ano_med else '#3498db' for a in anos_val]
+colores = ['#e74c3c' if a == año_med else '#3498db' for a in años_val]
 fig2 = go.Figure()
-fig2.add_trace(go.Bar(x=list(anos_val), y=list(NR_vals), marker_color=colores))
+fig2.add_trace(go.Bar(x=list(años_val), y=list(NR_vals), marker_color=colores))
 fig2.add_hline(y=NR_50, line_dash='dash', line_color='orange',
                annotation_text='P50=' + str(round(NR_50)) + ' mm')
-fig2.update_layout(title='Figura 2. Necesidades netas de riego por ano',
-    xaxis_title='Ano', yaxis_title='NR (mm)', height=400, template='plotly_white')
+fig2.update_layout(title='Figura 2. Necesidades netas de riego por año',
+    xaxis_title='Año', yaxis_title='NR (mm)', height=400, template='plotly_white')
 st.plotly_chart(fig2, use_container_width=True)
 
 tabla_nr = pd.DataFrame({
-    'Ano': anos_val,
-    'NR (mm)': [round(resultados[a]['NR'], 1) for a in anos_val],
-    'N riegos': [resultados[a]['n_riegos'] for a in anos_val],
-    'Ano medio': ['SI' if a == ano_med else '' for a in anos_val]
+    'Año': años_val,
+    'NR (mm)': [round(resultados[a]['NR'], 1) for a in años_val],
+    'N riegos': [resultados[a]['n_riegos'] for a in años_val],
+    'Año medio': ['SI' if a == año_med else '' for a in años_val]
 })
-with st.expander("Ver tabla NR por ano"):
+with st.expander("Ver tabla NR por año"):
     st.dataframe(tabla_nr, use_container_width=True)
 
 st.markdown("---")
@@ -126,7 +126,7 @@ fig3.update_layout(title='Figura 3. Probabilidad de excedencia',
 st.plotly_chart(fig3, use_container_width=True)
 
 tabla_exc = pd.DataFrame({
-    'Ano': anos_val,
+    'Año': años_val,
     'NR (mm)': [round(v, 1) for v in NR_vals],
     'NR ordenada': [round(v, 1) for v in NR_ord],
     'N orden': list(range(1, n_total + 1)),
@@ -136,13 +136,13 @@ with st.expander("Ver tabla probabilidades"):
     st.dataframe(tabla_exc, use_container_width=True)
 
 st.markdown("---")
-st.header("5. Ano medio: " + str(ano_med))
+st.header("5. Año medio: " + str(año_med))
 c1, c2, c3 = st.columns(3)
-c1.metric("Ano medio", ano_med)
-c2.metric("NR", str(round(resultados[ano_med]['NR'], 1)) + " mm")
-c3.metric("N riegos", resultados[ano_med]['n_riegos'])
+c1.metric("Año medio", año_med)
+c2.metric("NR", str(round(resultados[año_med]['NR'], 1)) + " mm")
+c3.metric("N riegos", resultados[año_med]['n_riegos'])
 
-res_med  = resultados[ano_med]
+res_med  = resultados[año_med]
 ac_serie = res_med['ac_serie']
 dias_p   = list(range(1, len(ac_serie) + 1))
 datos_m  = res_med['datos']
@@ -154,8 +154,8 @@ fig4.add_hline(y=CONSIGNA, line_dash='dash', line_color='red',
                annotation_text='Consigna=' + str(round(CONSIGNA, 1)) + ' mm')
 for (di, lam) in res_med['riego_dias']:
     fig4.add_vline(x=di + 1, line_color='#3498db', opacity=0.3, line_width=1)
-fig4.update_layout(title='Figura 4. Agua consumida - Ano ' + str(ano_med),
-    xaxis_title='Dia del ano', yaxis_title='Lamina agotada (mm)',
+fig4.update_layout(title='Figura 4. Agua consumida - Año ' + str(año_med),
+    xaxis_title='Dia del año', yaxis_title='Lamina agotada (mm)',
     height=400, template='plotly_white')
 st.plotly_chart(fig4, use_container_width=True)
 
@@ -176,8 +176,8 @@ fig5.add_hline(y=PMP + (IHD - CONSIGNA), line_dash='dash', line_color='red', lin
                annotation_text='Consigna=' + str(round(CONSIGNA, 1)) + ' mm')
 fig5.add_hline(y=PMP, line_dash='dot', line_color='brown', line_width=1.5,
                annotation_text='PMP=' + str(round(PMP)) + ' mm')
-fig5.update_layout(title='Figura 5. Lamina disponible - Ano ' + str(ano_med),
-    xaxis_title='Dia del ano', yaxis_title='Lamina (mm)',
+fig5.update_layout(title='Figura 5. Lamina disponible - Año ' + str(año_med),
+    xaxis_title='Dia del año', yaxis_title='Lamina (mm)',
     yaxis=dict(range=[PMP * 0.9, CC * 1.05]),
     height=400, template='plotly_white')
 st.plotly_chart(fig5, use_container_width=True)
@@ -192,7 +192,7 @@ for i, (di, lam) in enumerate(res_med['riego_dias'], 1):
         doy   = di
     filas.append({'N': i, 'Fecha': fecha, 'Dia': doy, 'Lamina (mm)': round(lam, 1)})
 
-st.markdown("**Tabla de riegos - Ano " + str(ano_med) + "**")
+st.markdown("**Tabla de riegos - Año " + str(año_med) + "**")
 st.dataframe(pd.DataFrame(filas), use_container_width=True)
 
 st.markdown("---")
@@ -200,7 +200,7 @@ buf = io.BytesIO()
 with pd.ExcelWriter(buf, engine='openpyxl') as writer:
     tabla_nr.to_excel(writer,  sheet_name='NR anual',        index=False)
     tabla_exc.to_excel(writer, sheet_name='Prob excedencia',  index=False)
-    pd.DataFrame(filas).to_excel(writer, sheet_name='Riegos ano medio', index=False)
+    pd.DataFrame(filas).to_excel(writer, sheet_name='Riegos año medio', index=False)
 buf.seek(0)
 st.download_button("Descargar resultados en Excel", data=buf,
     file_name="balance_riego.xlsx",
